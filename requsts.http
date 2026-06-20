@@ -1,0 +1,51 @@
+### Variables Globales de Prueba
+@hostname = localhost
+@port = 3000
+@baseUrl = http://{{hostname}}:{{port}}/api
+
+
+### 1. Registrar un nuevo Veterinario (Con la "ñ" de Antioquia)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "nombre": "Zuñiga Veterinario",
+  "email": "zuniga1@veterinaria.com",
+  "telefono": "3001234567",
+  "direccion": "Bello, Antioquia",
+  "rol": "veterinario",
+  "password": "MiPasswordConÑand123!"
+}
+
+
+### 2. Intentar registrar el mismo correo (Debe dar Error 409)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "nombre": "Duplicado",
+  "email": "zuniga1@veterinaria.com",
+  "rol": "cliente",
+  "password": "otraContraseña"
+}
+
+
+### 3. Hacer Login con el usuario creado
+// Este request guardará el token automáticamente si tu IDE lo soporta
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "zuniga1@veterinaria.com",
+  "password": "MiPasswordConÑand123!"
+}
+
+
+### 4. Hacer Login con contraseña incorrecta (Debe dar Error 401)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "zuniga1@veterinaria.com",
+  "password": "password_incorrecto"
+}
