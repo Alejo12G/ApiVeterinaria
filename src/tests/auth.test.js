@@ -18,7 +18,18 @@ jest.unstable_mockModule("bcrypt", () => ({
 
 jest.unstable_mockModule("jsonwebtoken", () => ({
   default: {
-    sign: jest.fn(() => "token_test"),
+    sign: jest.fn((payload, secret, options) => {
+      if (options && options.expiresIn === "15m") return "access_token_test";
+      if (options && options.expiresIn === "30d") return "refresh_token_test";
+      return "token_test";
+    }),
+    verify: jest.fn((token, secret, callback) => {
+      if (token === "refresh_token_test") {
+        callback(null, { id: 1, nombre: "Juan", rol: "cliente" });
+      } else {
+        callback(new Error("Invalid token"));
+      }
+    })
   },
 }));
 
@@ -69,7 +80,8 @@ describe("Auth API", () => {
 
     expect(response.statusCode).toBe(200);
 
-    expect(response.body.token).toBe("token_test");
+    expect(response.body.accessToken).toBe("access_token_test");
+    expect(response.body.refreshToken).toBe("refresh_token_test");
   });
 
   test("Registro sin campos", async () => {
@@ -118,5 +130,21 @@ describe("Auth API", () => {
     });
 
     expect(response.statusCode).toBe(201);
+    expect(response.body.accessToken).toBe("access_token_test");
+    expect(response.body.refreshToken).toBe("refresh_token_test");
+  });
+  test("Refresh token válido emite nuevo access token", async () => {
+    const response = await request(app).post("/api/auth/refresh").send({
+      refreshToken: "refresh_token_test"
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body.accessToken).toBe("access_token_test");
+  });
+
+  test("Refresh token inválido es rechazado", async () => {
+    const response = await request(app).post("/api/auth/refresh").send({
+      refreshToken: "invalid_token"
+    });
+    expect(response.statusCode).toBe(403);
   });
 });

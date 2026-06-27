@@ -55,15 +55,22 @@ router.post("/login", async (req, res) => {
       nombre: user.nombre,
     };
 
-    // Generar el Token
+    // Generar el Access Token (Corto - ej: 15m)
     const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+      expiresIn: "15m",
+    });
+
+    // Generar el Refresh Token (Largo - ej: 30d)
+    const refreshSecret = process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET + "_refresh";
+    const refreshToken = jwt.sign(tokenPayload, refreshSecret, {
       expiresIn: "30d",
     });
 
     // 6. Responder a la app de MAUI (Status 200 OK implícito en res.json)
     res.json({
       mensaje: "Login exitoso",
-      token: accessToken,
+      accessToken,
+      refreshToken,
       usuario: {
         id: user.id,
         nombre: user.nombre,
@@ -124,13 +131,19 @@ router.post("/register", async (req, res) => {
       nombre: usuario.nombre,
     };
     const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+      expiresIn: "15m",
+    });
+
+    const refreshSecret = process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET + "_refresh";
+    const refreshToken = jwt.sign(tokenPayload, refreshSecret, {
       expiresIn: "30d",
     });
 
     // 6. Responder con éxito
     res.status(201).json({
       mensaje: "Usuario registrado exitosamente",
-      token: accessToken,
+      accessToken,
+      refreshToken,
       usuario,
     });
   } catch (error) {
@@ -140,4 +153,35 @@ router.post("/register", async (req, res) => {
       .json({ error: "Error interno del servidor al registrar usuario" });
   }
 });
+// --- ENDPOINT REFRESH TOKEN ---
+router.post("/refresh", async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(401).json({ error: "Refresh token es requerido" });
+  }
+
+  const refreshSecret = process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET + "_refresh";
+
+  jwt.verify(refreshToken, refreshSecret, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: "Refresh token inválido o expirado" });
+    }
+
+    // Generar un nuevo access token
+    const tokenPayload = {
+      id: user.id,
+      rol: user.rol,
+      nombre: user.nombre,
+    };
+
+    const newAccessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+      expiresIn: "15m",
+    });
+
+    res.json({
+      accessToken: newAccessToken
+    });
+  });
+});
+
 export default router;

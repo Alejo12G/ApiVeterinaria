@@ -7,14 +7,15 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "start": "node index.js",
-    "dev": "node --watch index.js"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --verbose",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "firebase-admin": "^14.1.0",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.9.7"
   },

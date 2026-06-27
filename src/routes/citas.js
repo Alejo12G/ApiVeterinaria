@@ -98,6 +98,7 @@ router.post("/", async (req, res) => {
     }
 
     // Insertar la cita asignando el estado 'programada' por defecto
+    const fechaObj = new Date(fecha);
     const [result] = await pool.execute(
       `INSERT INTO citas (id_mascota,id_usuario, id_veterinario, id_servicio, fecha, estado, motivo, duracion_minutos) 
        VALUES (?, ?,?, ?, ?, 'programada', ?, ?)`,
@@ -106,7 +107,7 @@ router.post("/", async (req, res) => {
         idUsuario,
         idVeterinario,
         idServicio,
-        fecha,
+        fechaObj,
         motivo || null,
         duracionMinutos,
       ],
@@ -230,6 +231,190 @@ router.patch("/:id/cancelar", async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+//  GET /api/citas/asignadas
+//  Retorna las citas asignadas al veterinario autenticado.
+//  Solo accesible para usuarios con rol 'veterinario' o 'administrador'.
+// ═══════════════════════════════════════════════════════════
+router.get("/asignadas", async (req, res) => {
+  try {
+    const idVeterinario = req.user.id;
+    const rol = req.user.rol;
 
+    // Validar que el usuario sea staff
+    if (rol !== "veterinario" && rol !== "administrador") {
+      return res.status(403).json({ error: "Acceso denegado: solo veterinarios pueden ver citas asignadas." });
+    }
 
+    const sqlQuery = `
+      SELECT 
+        c.id, 
+        DATE_FORMAT(c.fecha, '%Y-%m-%dT%H:%i:%s') AS fecha, 
+        c.estado, 
+        c.motivo, 
+        c.duracion_minutos AS duracionMinutos,
+        s.nombre AS servicioNombre, 
+        s.categoria AS servicioCategoria, 
+        s.precio_base AS servicioPrecioBase,
+        u_cli.nombre AS clienteNombre,
+        m.nombre AS mascotaNombre, 
+        m.foto_url AS mascotaFotoUrl
+      FROM citas c
+      INNER JOIN servicios s ON c.id_servicio = s.id
+      INNER JOIN usuarios u_cli ON c.id_usuario = u_cli.id
+      LEFT JOIN mascotas m ON c.id_mascota = m.id
+      WHERE c.id_veterinario = ?
+      ORDER BY c.fecha DESC
+    `;
+
+    const [citas] = await pool.execute(sqlQuery, [idVeterinario]);
+
+    const citasFormateadas = citas.map(cita => ({
+      ...cita,
+      servicioPrecioBase: parseFloat(cita.servicioPrecioBase)
+    }));
+
+    res.json(citasFormateadas);
+
+  } catch (error) {
+    console.error("Error al obtener citas asignadas:", error);
+    res.status(500).json({ error: "Error interno del servidor al obtener las citas asignadas" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  GET /api/citas/:id/detalle
+//  Retorna la información completa de una cita con todos
+//  los datos relacionados (servicio, cliente, mascota, especie).
+//  Solo accesible por el veterinario asignado o un admin.
+// ═══════════════════════════════════════════════════════════
+router.get("/:id/detalle", async (req, res) => {
+  try {
+    const citaId = req.params.id;
+    const userId = req.user.id;
+    const rol = req.user.rol;
+
+    const sqlQuery = `
+      SELECT 
+        c.id, 
+        DATE_FORMAT(c.fecha, '%Y-%m-%dT%H:%i:%s') AS fecha, 
+        c.estado, 
+        c.motivo, 
+        c.duracion_minutos AS duracionMinutos,
+        s.nombre AS servicioNombre, 
+        s.categoria AS servicioCategoria, 
+        s.precio_base AS servicioPrecioBase,
+        s.descripcion AS servicioDescripcion,
+        s.duracion_estimada_min AS servicioDuracionEstimada,
+        u_cli.nombre AS clienteNombre,
+        u_cli.email AS clienteEmail,
+        u_cli.telefono AS clienteTelefono,
+        m.nombre AS mascotaNombre, 
+        m.sexo AS mascotaSexo,
+        m.esterilizado AS mascotaEsterilizado,
+        DATE_FORMAT(m.fecha_nacimiento, '%Y-%m-%d') AS mascotaFechaNacimiento,
+        m.foto_url AS mascotaFotoUrl,
+        e.nombre_comun AS especieNombre,
+        c.id_veterinario AS idVeterinario,
+        c.id_usuario AS clienteId
+      FROM citas c
+      INNER JOIN servicios s ON c.id_servicio = s.id
+      INNER JOIN usuarios u_cli ON c.id_usuario = u_cli.id
+      LEFT JOIN mascotas m ON c.id_mascota = m.id
+      LEFT JOIN especies e ON m.id_especie = e.id
+      WHERE c.id = ?
+    `;
+
+    const [citas] = await pool.execute(sqlQuery, [citaId]);
+
+    if (citas.length === 0) {
+      return res.status(404).json({ error: "La cita no existe." });
+    }
+
+    const cita = citas[0];
+
+    // Validar que el usuario sea el veterinario asignado o un admin
+    if (rol !== "administrador" && cita.idVeterinario !== userId) {
+      return res.status(403).json({ error: "No tienes permiso para ver esta cita." });
+    }
+
+    // Limpiar campo interno antes de enviar
+    delete cita.idVeterinario;
+
+    cita.servicioPrecioBase = parseFloat(cita.servicioPrecioBase);
+    cita.mascotaEsterilizado = cita.mascotaEsterilizado === 1;
+
+    res.json(cita);
+
+  } catch (error) {
+    console.error("Error al obtener detalle de cita:", error);
+    res.status(500).json({ error: "Error interno del servidor al obtener el detalle de la cita" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  PATCH /api/citas/:id/asignar-mascota
+//  Asigna una mascota a una cita que fue creada sin mascota.
+//  Solo accesible por el veterinario asignado o un admin.
+//  Body: { idMascota }
+// ═══════════════════════════════════════════════════════════
+router.patch("/:id/asignar-mascota", async (req, res) => {
+  try {
+    const citaId = req.params.id;
+    const userId = req.user.id;
+    const rol = req.user.rol;
+    const { idMascota } = req.body;
+
+    if (!idMascota) {
+      return res.status(400).json({ error: "El ID de la mascota es obligatorio." });
+    }
+
+    // Obtener la cita
+    const [citas] = await pool.execute(
+      `SELECT c.id, c.id_veterinario, c.id_mascota, c.id_usuario 
+       FROM citas c WHERE c.id = ?`,
+      [citaId]
+    );
+
+    if (citas.length === 0) {
+      return res.status(404).json({ error: "La cita no existe." });
+    }
+
+    const cita = citas[0];
+
+    // Validar permisos: solo el veterinario asignado o un admin
+    if (rol !== "administrador" && cita.id_veterinario !== userId) {
+      return res.status(403).json({ error: "No tienes permiso para modificar esta cita." });
+    }
+
+    // Validar que la cita no tenga mascota ya asignada
+    if (cita.id_mascota !== null) {
+      return res.status(400).json({ error: "Esta cita ya tiene una mascota asignada." });
+    }
+
+    // Validar que la mascota pertenece al dueño de la cita
+    const [mascotas] = await pool.execute(
+      `SELECT id FROM mascotas WHERE id = ? AND id_usuario = ?`,
+      [idMascota, cita.id_usuario]
+    );
+
+    if (mascotas.length === 0) {
+      return res.status(400).json({ error: "La mascota no pertenece al cliente de esta cita." });
+    }
+
+    // Asignar la mascota
+    await pool.execute(
+      `UPDATE citas SET id_mascota = ? WHERE id = ?`,
+      [idMascota, citaId]
+    );
+
+    res.json({ mensaje: "Mascota asignada correctamente.", idMascota });
+
+  } catch (error) {
+    console.error("Error al asignar mascota:", error);
+    res.status(500).json({ error: "Error al asignar la mascota a la cita." });
+  }
+});
+
+// (La ruta PATCH /:id/completar fue migrada a diagnosticos.js para cumplir con TC-004)
 export default router;
